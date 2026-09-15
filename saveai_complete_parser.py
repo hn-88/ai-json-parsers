@@ -38,9 +38,11 @@ A single export file can contain messages from multiple chatGroupIds
 split across multiple files (e.g. incremental exports) - this script
 merges messages by chatGroupId across every file it's given.
 
-There is no per-conversation title in the schema, so the first user
-message is used to derive one, same as the Claude parser does for
-untitled conversations.
+There is no title field inside the schema itself, but saveai.net names
+each downloaded .json file after the conversation (or you've renamed it
+yourself), so this script uses the source filename as the conversation
+title. It only falls back to deriving a title from the first user
+message if a chatGroupId somehow has no associated filename.
 
 USAGE
 -----
@@ -66,6 +68,8 @@ class SaveAIParser:
 
         # Raw messages collected from every file, keyed by chatGroupId -> list[message]
         self.groups: Dict[str, List[Dict]] = {}
+        # Which source file(s) (by stem) each chatGroupId came from, keyed by chatGroupId -> set[str]
+        self.group_source_files: Dict[str, set] = {}
         # After grouping/sorting: list of conversation records
         self.conversations: List[Dict] = []
 
@@ -145,6 +149,7 @@ class SaveAIParser:
                     continue
                 group_id = msg.get('chatGroupId', 'unknown_group')
                 self.groups.setdefault(group_id, []).append(msg)
+                self.group_source_files.setdefault(group_id, set()).add(file_path.stem)
                 self._messages_total += 1
 
         print(f"\nSummary:")
@@ -208,6 +213,8 @@ class SaveAIParser:
             display_model = next((m.get('displayModel') for m in messages_sorted if m.get('displayModel')), 'Unknown')
             model_ids = sorted({m.get('modelId') for m in messages_sorted if m.get('modelId')})
 
+            source_files = sorted(self.group_source_files.get(group_id, []))
+
             self.conversations.append({
                 'chat_group_id': group_id,
                 'messages': messages_sorted,
@@ -215,6 +222,7 @@ class SaveAIParser:
                 'model_ids': model_ids,
                 'first_ts': self._to_datetime(first_ts),
                 'last_ts': self._to_datetime(last_ts),
+                'source_files': source_files,
             })
 
     def _to_datetime(self, epoch_ms: Optional[float]) -> Optional[datetime]:
@@ -296,6 +304,18 @@ class SaveAIParser:
         return f"{count} messages"
 
     def display_title(self, conversation: Dict) -> str:
+        """Title the conversation after its source .json filename (this is
+        what saveai.net names the file as when you export/rename a chat),
+        falling back to the first user message only if no filename is
+        available for some reason."""
+        source_files = conversation.get('source_files') or []
+        if len(source_files) == 1:
+            return source_files[0]
+        if len(source_files) > 1:
+            # Same chatGroupId split across multiple files (e.g. incremental
+            # exports) - join their names so nothing is silently dropped.
+            return " + ".join(source_files)
+
         first = self.first_user_text(conversation)
         if first:
             return self.clean_summary_text(first, max_len=50)
@@ -415,9 +435,9 @@ Export generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
     └── conversations_index.md
 ```
 
-**Note:** saveai.net exports messages flat, grouped by `chatGroupId`, with
-no dedicated conversation title. Titles above are derived from each
-conversation's first user message.
+**Note:** saveai.net exports messages flat, grouped by `chatGroupId`.
+Conversation titles above are taken from each source .json filename
+(falling back to the first user message only if no filename is known).
 
 """
 
