@@ -160,21 +160,45 @@ class SaveAIParser:
 
         self._build_conversations()
 
-    def _message_sort_key(self, msg: Dict):
-        """Prefer the trailing integer in the id (e.g. 'google_12' -> 12),
-        fall back to updated_at, then created_at, then 0."""
-        msg_id = str(msg.get('id', ''))
-        m = re.search(r'(\d+)$', msg_id)
-        if m:
-            return (0, int(m.group(1)))
-        updated = msg.get('updated_at')
-        if isinstance(updated, (int, float)):
-            return (1, updated)
-        return (2, 0)
+    def _id_trailing_number(self, msg: Dict) -> Optional[int]:
+        m = re.search(r'(\d+)$', str(msg.get('id', '')))
+        return int(m.group(1)) if m else None
+
+    def _choose_sort_strategy(self, messages: List[Dict]) -> str:
+        """Different sites' saveai.net exports carry ordering info
+        differently, so pick whichever is actually trustworthy for this
+        group rather than assuming one scheme fits everyone:
+
+        - AI Studio's free-tier export gives every message in a group the
+          SAME updated_at, but ids are sequential ('google_0', 'google_1',
+          ...) - so the trailing id number is the only real ordering signal.
+        - Claude/other exports give each message its own distinct
+          updated_at, but ids are UUIDs where a trailing-digit sort is
+          meaningless - so updated_at is the right signal there.
+
+        Rule: if updated_at varies across the group, trust it. Otherwise
+        fall back to the trailing id number (if every message has one).
+        """
+        timestamps = [m.get('updated_at') for m in messages if isinstance(m.get('updated_at'), (int, float))]
+        if len(set(timestamps)) > 1:
+            return 'timestamp'
+
+        id_numbers = [self._id_trailing_number(m) for m in messages]
+        if all(n is not None for n in id_numbers):
+            return 'id_number'
+
+        return 'timestamp'  # last resort, even if it won't distinguish anything
 
     def _build_conversations(self) -> None:
         for group_id, messages in self.groups.items():
-            messages_sorted = sorted(messages, key=self._message_sort_key)
+            strategy = self._choose_sort_strategy(messages)
+            if strategy == 'id_number':
+                messages_sorted = sorted(messages, key=lambda m: self._id_trailing_number(m) or 0)
+            else:
+                messages_sorted = sorted(
+                    messages,
+                    key=lambda m: m.get('updated_at') if isinstance(m.get('updated_at'), (int, float)) else 0
+                )
 
             timestamps = [m['updated_at'] for m in messages_sorted
                           if isinstance(m.get('updated_at'), (int, float))]
@@ -219,15 +243,20 @@ class SaveAIParser:
             return "Unknown date"
         return dt.strftime("%B %d, %Y at %I:%M %p")
 
+    # Content item types that hold plain renderable text (as opposed to
+    # images, files, etc.). saveai.net uses "text" for most sites but
+    # exports Claude conversations with "markdown" instead.
+    TEXT_CONTENT_TYPES = {'text', 'markdown'}
+
     def extract_message_text(self, msg: Dict) -> str:
-        """Join all 'text' content items; note any non-text content types."""
+        """Join all text-like content items; note any other content types."""
         parts = []
         notes = []
         for item in msg.get('contents', []) or []:
             if not isinstance(item, dict):
                 continue
             item_type = item.get('type', 'text')
-            if item_type == 'text':
+            if item_type in self.TEXT_CONTENT_TYPES:
                 text = item.get('content', '')
                 if text:
                     parts.append(text)
