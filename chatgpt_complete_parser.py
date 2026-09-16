@@ -13,6 +13,9 @@ chat.html (skipping abandoned "regenerate" branches), then reverses it
 into chronological order. Each message's own `create_time` is used for
 per-turn timestamps, and the conversation's `create_time`/`update_time`
 give the date/time info that's missing from chat.html.
+
+Usage:
+python3 chatgpt_complete_parser.py conversations-*.json
 """
 
 import argparse
