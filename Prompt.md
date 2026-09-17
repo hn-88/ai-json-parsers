@@ -37,3 +37,41 @@ Then, it offered to parse the files for me, and I replied, uploading the py file
 _Please give me python code to do the parsing locally, and generate index files etc similar to this python script for Claude's data (uploaded)_
 
 and it generated `chatgpt_complete_parser.py`.
+
+### AIStudio zip parser prompt
+
+This prompt was sent to Gemini 3.5 Flash lite via aistudio.google.com
+
+_Please create python code for parsing such a zip archive from the Google AI Studio directory in Google Drive - it should create a directory with the individual conversations in markdown, and an index of all the conversations. A format similar to https://github.com/tyashin/Claude-export-data-parser would be nice - that would include the title of the conversation, the first few words as well as the date in the index of conversations._
+
+The script it created gave an error, which I presented as a follow-up prompt,
+
+_parse_ai_studio_zip.py", line 175, in <module>
+parse_ai_studio_archive(ZIP_FILE_PATH, OUTPUT_DIR)
+File "/home/sssvv/Downloads/AIStudioConversations/parse_ai_studio_zip.py", line 50, in parse_ai_studio_archive
+data.get("title")
+^^^^^^^^
+AttributeError: 'list' object has no attribute 'get'_
+
+It corrected the script, but then introduced a typo which led to an error which I presented as the next prompt - 
+
+_python3 parse_ai_studio_zip.py File_
+_"/home/sssvv/Downloads/AIStudioConversations/parse_ai_studio_zip.py", line 53_
+_data = items[0] 0 ^ SyntaxError: invalid syntax_
+
+Then, found that this script was only looking at files with `.json` extension, while the actual conversations did not have the extension. So, next prompt was,
+
+_Unfortunately, the files in the zip file with the actual conversations don't have the json extension. An example file is pasted below, which has the filename "Atmosphere Shader_ _Doubles vs. Floats". The parser script has to be updated to check whether the file has json content, it can't rely on the filename having .json extension.
+Pasting the content of an example file below,_ (and I pasted in a json conversation with that filename.)
+
+Now it generated all the conversations as markdown, but with Unknown Date for all of them. So, the next prompt was,
+
+_Instead of writing "Unknown Date" if the date info is not found in the
+conversation, please use the date metadata of the file (created date or modified
+date) to fill the date field._
+
+And now I had to ask it to sort - 
+
+_And the index should be sorted datewise, with the most recent on top._
+
+This was the script I used as parse_ai_studio_zip.py
